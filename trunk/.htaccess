@@ -1,0 +1,4 @@
+# $Id$
+
+DirectoryIndex index.cgi
+Options +ExecCGI
