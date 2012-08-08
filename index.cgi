@@ -1,6 +1,19 @@
 #!/usr/bin/perl
 # $Id$
 
+=USAGE
+
+perl index.cgi
+ process /tmp/banbot banperm
+
+perl index.cgi /path/to/access.log
+ process access.log
+
+run from web server:
+ add line to /tmp/banbot
+
+
+
 =howto
 
 touch /tmp/banbot && chmod a+rw /tmp/banbot
@@ -18,7 +31,16 @@ robots.txt:
  User-agent: *
  Disallow: /nobot/
 
+
+to ban security hole scanners:
+ echo "Include /usr/local/www/nobot/defence.conf" >> /usr/local/etc/apache22/httpd.conf
+OR
+ ln -s /usr/local/www/nobot/defence.conf /usr/local/etc/apache22/Includes
+and include defence.conf in your httpd.conf
+
 =cut
+
+
 
 use strict;
 use Data::Dumper;
@@ -55,11 +77,9 @@ if ( $ENV{'SERVER_PORT'} ) {
                     #}
   exit;
 }    # els
-my ( %ban, %net, %cookie );
+my ( %ban, %net, %cookie, %ip, %stat );
 my $goodua = qr/bot|Yahoo|Rambler|facebook/i;
 if ( grep { -s $_ } @ARGV ) {
-  my %ip;
-  my %stat;
   sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}g; return $_ }
   my %badua = map { $_ => 1 } (
     'Mozilla/4.0 (compatible; MSIE 5.0; Windows 3.1)',
@@ -80,12 +100,14 @@ if ( grep { -s $_ } @ARGV ) {
     /?form=1&lang=en&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
     /?form=1&lang=ru&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
   );
-  my $re = join '|', map { resc $_ } sort ( keys %badua, keys %badurl );
+  $config{ref_bad} = {map { $_ => 1 }qw( http://alawarstore.com http://diazepampill.com http://gotovoe-dz.ru/publ/ http://gotovoe-dz.ru) };
+  my $re = join '|', map { resc $_ } sort ( keys %badua, keys %badurl, keys %{$config{ref_bad}||{}} );
   #warn $re;
   $re = qr/$re/;
   #warn $re;
   #warn Dumper \%goodurl;
   for my $logfile ( grep { -s $_ } @ARGV ) {
+#warn $logfile;
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     while (<$f>) {
       my ($ip) = /^(\S+)/;
@@ -114,7 +136,12 @@ m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) \S+\] "\S+ (?<url>\S+) \S+" \d+ (?<size
         ++$stat{other_url}{ $_{url} };
         ++$stat{other_url_total};
       }
+      if ( $config{ref_bad}{ $_{ref} } ) {
+        ++$ip{ $_{ip} }{ref_bad};
+        $ip{ $_{ip} }{ref_bad_first} ||= $_{ref};
+      }
       #! ++$stat{domain}{ $_{domain} } if $_{domain};
+       ++$stat{ref}{ $_{ref} } if $_{ref};
       #warn $_{url};
       #warn Dumper \%_ if $goodurl{$_{url}};
       if ( $goodurl{ $_{url} } ) {
@@ -137,10 +164,11 @@ m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) \S+\] "\S+ (?<url>\S+) \S+" \d+ (?<size
       }
     }
   }
-  $stat{bad_ip} = scalar keys %ip;
-#print Dumper \%ip, \%stat, \%net, \%ban;
+  $stat{bad_ip} = scalar keys %ip if %ip;
+print Dumper \%ip, \%stat, \%net, \%ban;
 #print map { "$stat{other_url}{$_} : $_\n" } sort    { $stat{other_url}{$b} <=> $stat{other_url}{$a} } keys %{ $stat{other_url} || {} }
 #print map { "$stat{domain}{$_} : $_\n" } sort    { $stat{domain}{$b} <=> $stat{domain}{$a} } keys %{ $stat{domain} || {} }
+#print map { "$stat{ref}{$_} : $_\n" } sort    { $stat{ref}{$b} <=> $stat{ref}{$a} } keys %{ $stat{ref} || {} }
 #exit;
 #print Dumper \%stat;
 #print Dumper \%ip;
