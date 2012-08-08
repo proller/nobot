@@ -39,7 +39,6 @@ OR
 and include defence.conf in your httpd.conf
 
 =cut
-
 use strict;
 use Data::Dumper;
 $Data::Dumper::Sortkeys = $Data::Dumper::Useqq = $Data::Dumper::Indent = 1;
@@ -84,6 +83,7 @@ my (%ban, %net, %cookie, %ip, %stat);
 #my $goodua = qr/bot|Yahoo|Rambler|facebook/i;
 if (grep { -s $_ } @ARGV) {
   sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}g; return $_ }
+  my @bad_fields = (grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}});
 
 =no
   my %badua = map { $_ => 1 } (
@@ -107,24 +107,27 @@ if (grep { -s $_ } @ARGV) {
   );
   $config{ref_bad} = {map { $_ => 1 }qw( http://alawarstore.com http://diazepampill.com http://gotovoe-dz.ru/publ/ http://gotovoe-dz.ru) };
 =cut
-  my $re = join '|', map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, keys %{$config{bad}{url} || {}}, keys %{$config{bad}{ref} || {}});
+
+  my $re = join '|', map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, (map { $config{fast_re_url_bef} . $_ } keys %{$config{bad}{url} || {}}), (keys %{$config{bad}{ref} || {}}));
+#$config{fast_re_ref_bef} =  'GET ';
   #warn $re;
   $re = qr/$re/;
 #  warn $re;
-
   #warn Dumper \%goodurl;
-
- my @bad_fields =  (grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}});
+  my $stop;
+  local $SIG{INT} = sub { ++$stop; };
   for my $logfile (grep { -s $_ } @ARGV) {
-#warn $logfile;
+    warn "reading $logfile";
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     while (<$f>) {
-      my ($ip) = $_ =~ $config{ip_re};#/^(\S+)/;
+      if ($config{fast_re}) {
+        my ($ip) = $_ =~ $config{ip_re};    #/^(\S+)/;
         ++$stat{total}{lines};
-      ++$ip{$ip}{total} if $ip{$ip};
+        ++$ip{$ip}{total} if $ip{$ip};
 #dmp $ip;
 #dmp $re;
-      next if !$ip{$ip} and $_ !~ $re;
+        next if !$ip{$ip} and $_ !~ $re;
+      }
 #dmp $_ if $_ =~ $re;
 #      next if  $_ !~ $re;
       local %_;
@@ -135,6 +138,7 @@ if (grep { -s $_ } @ARGV) {
       if ($config{log_kv}) {
         %_ = map {/([^=]+)=?(.*)?/} split /\t+/;
         ($_{url}) = $_{request} =~ /\S+ (\S+) \S+/ if $_{request} and !$_{url};
+        $_{ref} = $_{referer};
 #dmp \%_;
       } else {
         $_ =~ $config{log_re};
@@ -143,45 +147,24 @@ if (grep { -s $_ } @ARGV) {
       next unless $_{ip};
 #dmp $config{good}{ua};
       next if $_{ua} =~ $config{good}{ua};
-
 #exit;
-
-      $ip{$_{ip}}{first}{$_} ||= $_{$_} for grep {length $_{$_}}  qw(ua ref url);
       #$ip{$_{ip}}{ua_first} ||= $_{ua};
-      for my $field (@bad_fields ) { #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
+      my $bad_hit;
+      for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
         if ($config{bad}{$field}{$_{$field}}) {
           $ip{$_{ip}}{first}{'bad_' . $field} ||= $_{$field} if $_{$field};
           ++$stat{total}{bad}{$field};
+          ++$stat{total}{bad_hits};
+          ++$bad_hit;
         } else {
         }
-      ++$stat{fields}{$field}{$_{$field}} if $_{$field};
+#        ++$stat{fields}{$field}{$_{$field}} if $_{$field};
       }
-    
-      if (0) {
-        if ($config{bad}{ua}{$_{ua}}) {
-          ++$ip{$_{ip}}{bad_ua};
-          $ip{$_{ip}}{bad_ua_first} ||= $_{ua};
-          ++$stat{badua_total};
-        } else {
-          ++$stat{other_ua}{$_{ua}};
-          ++$stat{other_ua_total};
-        }
-        if ($config{bad}{url}{$_{url}}) {
-          ++$ip{$_{ip}}{bad_url};
-          #$ip{$_{ip}}{bad_url_first} ||= $_{url};
-        } else {
-          #++$ip{ $_{ip} }{other_url}{$_{url}};
-          ++$stat{other_url}{$_{url}};
-          ++$stat{other_url_total};
-        }
-        if ($config{bad}{ref}{$_{ref}}) {
-          ++$ip{$_{ip}}{ref_bad};
-          $ip{$_{ip}}{ref_bad_first} ||= $_{ref};
-        }
-        #! ++$stat{domain}{ $_{domain} } if $_{domain};
-        ++$stat{ref}{$_{ref}} if $_{ref};
-        #warn $_{url};
-        #warn Dumper \%_ if $goodurl{$_{url}};
+      next if !$bad_hit and !$ip{$_{ip}};
+      ++$stat{total}{bad_hits};
+      $ip{$_{ip}}{first}{$_} ||= $_{$_} for grep { length $_{$_} } qw(ua ref url);
+      for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
+        ++$stat{fields}{$field}{$_{$field}} if $_{$field};
       }
       if ($config{good}{url}{$_{url}}) {
         ++$ip{$_{ip}}{good_url};
@@ -203,18 +186,22 @@ if (grep { -s $_ } @ARGV) {
           ++$ban{$_{ip}} if $_{ip};
         }
       }
+      last if $stop;
     }
   }
   $stat{total}{bad_ips} = scalar keys %ip if %ip;
-    $stat{zzz_total} = $stat{total};
+  $stat{zzz_total} = $stat{total};
 #  dmp 'stat:', \%ip, \%stat, \%net, \%ban;
   dmp 'stat:', \%ip, \%stat;
-for my $field (@bad_fields) {
-print "stat by $field:\n";
-print map { "$stat{fields}{$field}{$_} : $_\n" } sort    { $stat{fields}{$field}{$b} <=>$stat{fields}{$field}{$a} } keys %{ $stat{fields}{$field} || {} }
+  for my $field (@bad_fields) {
+    print "stat by $field:\n";
+    for (sort { $stat{fields}{$field}{$b} <=> $stat{fields}{$field}{$a} } keys %{$stat{fields}{$field} || {}}
+      ) {
+      last if $stat{fields}{$field}{$_} < $config{stat_min};
+      print "$stat{fields}{$field}{$_} : $_\n";
 #    $stat{fields}
-}
-
+    }
+  }
 #print map { "$stat{other_url}{$_} : $_\n" } sort    { $stat{other_url}{$b} <=> $stat{other_url}{$a} } keys %{ $stat{other_url} || {} }
 #print map { "$stat{domain}{$_} : $_\n" } sort    { $stat{domain}{$b} <=> $stat{domain}{$a} } keys %{ $stat{domain} || {} }
 #print map { "$stat{ref}{$_} : $_\n" } sort    { $stat{ref}{$b} <=> $stat{ref}{$a} } keys %{ $stat{ref} || {} }
