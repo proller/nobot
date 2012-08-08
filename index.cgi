@@ -56,6 +56,7 @@ local %_ = (
 );
 $config{$_} = $_{$_} for keys %_;
 do 'config.pl';
+warn "config.pl wrong: $@" if $@; 
 if ($ENV{'SERVER_PORT'}) {
   my ($ip, $ref) = split /&/, $ENV{'QUERY_STRING'}, 2;
   #if ( $ip eq $ENV{'REMOTE_ADDR'} ) {

@@ -1,0 +1,71 @@
+our %config;
+
+
+#warn Data::Dumper::Dumper  \%config;
+
+#re for parsing logfile
+#$config{log_re} = qr{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) \S+\] "\S+ (?<url>\S+) \S+" \d+ (?<size>\d+) "(?<ref>.*?)" "(?<ua>.*?)" (?<domain>\S+) \d+ \S+ (?<seconds>\d+)};
+
+#logfile is key=value\t...
+
+$config{stat_min} = 3 ;
+
+
+$config{log_kv} = 1 ;
+$config{fast_re} = 1;
+$config{fast_re_url_bef} =  'GET ';
+
+
+
+    $config{good}{ua} = qr/bot|Yahoo|Rambler|facebook/i;
+
+
+    $config{bad}{ua} = {map { $_ => 1 } (
+    'Mozilla/4.0 (compatible; MSIE 5.0; Windows 3.1)',
+    'Mozilla/1.22 (compatible; MSIE 2.0; Windows 95)',
+    'Mozilla/1.22 (compatible; MSIE 2.0d; Windows NT)',
+    'Mozilla/0.6 Beta (Windows)',
+    'Mozilla/3.0 (x86 [en] Windows NT 5.1; Sun)',
+    'Mozilla/4.0 (compatible; MSIE 4.01; Digital AlphaServer 1000A 4/233; Windows NT; Powered By 64-Bit Alpha Processor)',
+  )};
+  #my $badua = join '|', map { resc $_ } sort keys %badua;
+  #$badua = qr/ "(?:$badua)" /;
+  $config{bad}{ref} = {map { $_ => 1 }qw( http://alawarstore.com http://diazepampill.com http://gotovoe-dz.ru/publ/ http://gotovoe-dz.ru) };
+
+
+
+
+  
+
+  $config{bad}{url}  = {map { $_ => 1 } qw(
+    /?q=addurl
+    /?q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
+    /?form=1&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
+    /?lang=ru&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
+    /?lang=en&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
+    /?form=1&lang=en&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
+    /?form=1&lang=ru&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
+  )};
+  $config{good}{url} = {map { $_ => 1 } qw(/i/logo.png /lib/lib.js /base.css)};
+
+$config{ip_re} =  qr/^(\S+)/;
+
+
+
+
+
+  $config{ip_re} =  qr/^ip=(\S+)/;
+  $config{bad}{url}  = {map { $_ => 1 } qw(
+/login.php
+  /index.php
+  )};
+qw(
+/qboard/_index.php?x&qact=getrss&f=-1
+);
+
+  $config{good}{url} = {map { $_ => 1 } qw(
+/favicon.ico
+)};
+
+
+42;
