@@ -40,24 +40,27 @@ and include defence.conf in your httpd.conf
 
 =cut
 
-
-
 use strict;
 use Data::Dumper;
 $Data::Dumper::Sortkeys = $Data::Dumper::Useqq = $Data::Dumper::Indent = 1;
-my %config = (
+sub dmp (@) { print join ', ', (map { ref $_ ? Data::Dumper->new([$_])->Indent(1)->Pair('=>')->Terse(1)->Sortkeys(1)->Dump() : "'$_'" } @_), "\n"; }
+our %config;
+$config{root_path} = (($0 =~ m{^(.*(?:^|/))([^/]+)$})[0] || '.');
+local %_ = (
   'logfile' => [
     '/tmp/banbot',    #first must be writable
-    ( ( $0 =~ m{^(.*(?:^|/))([^/]+)$} )[0] || '.' ) . '/banperm',
+    $config{root_path} . '/banperm',
   ],
   'ipfwtable' => 10,
   'netmin'    => 3,
   'fw'        => 'ipfw -q',
 );
-if ( $ENV{'SERVER_PORT'} ) {
-  my ( $ip, $ref ) = split /&/, $ENV{'QUERY_STRING'}, 2;
+$config{$_} = $_{$_} for keys %_;
+do 'config.pl';
+if ($ENV{'SERVER_PORT'}) {
+  my ($ip, $ref) = split /&/, $ENV{'QUERY_STRING'}, 2;
   #if ( $ip eq $ENV{'REMOTE_ADDR'} ) {
-  if ( open my $f, '>>', ref $config{'logfile'} eq 'ARRAY' ? $config{'logfile'}[0] : $config{'logfile'} ) {
+  if (open my $f, '>>', ref $config{'logfile'} eq 'ARRAY' ? $config{'logfile'}[0] : $config{'logfile'}) {
     local $, = "\t";
     print $f "t=" . int(time), "ip=" . $ENV{'REMOTE_ADDR'},
       #"time=" . scalar localtime,
@@ -77,10 +80,12 @@ if ( $ENV{'SERVER_PORT'} ) {
                     #}
   exit;
 }    # els
-my ( %ban, %net, %cookie, %ip, %stat );
-my $goodua = qr/bot|Yahoo|Rambler|facebook/i;
-if ( grep { -s $_ } @ARGV ) {
+my (%ban, %net, %cookie, %ip, %stat);
+#my $goodua = qr/bot|Yahoo|Rambler|facebook/i;
+if (grep { -s $_ } @ARGV) {
   sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}g; return $_ }
+
+=no
   my %badua = map { $_ => 1 } (
     'Mozilla/4.0 (compatible; MSIE 5.0; Windows 3.1)',
     'Mozilla/1.22 (compatible; MSIE 2.0; Windows 95)',
@@ -101,71 +106,115 @@ if ( grep { -s $_ } @ARGV ) {
     /?form=1&lang=ru&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
   );
   $config{ref_bad} = {map { $_ => 1 }qw( http://alawarstore.com http://diazepampill.com http://gotovoe-dz.ru/publ/ http://gotovoe-dz.ru) };
-  my $re = join '|', map { resc $_ } sort ( keys %badua, keys %badurl, keys %{$config{ref_bad}||{}} );
+=cut
+  my $re = join '|', map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, keys %{$config{bad}{url} || {}}, keys %{$config{bad}{ref} || {}});
   #warn $re;
   $re = qr/$re/;
-  #warn $re;
+#  warn $re;
+
   #warn Dumper \%goodurl;
-  for my $logfile ( grep { -s $_ } @ARGV ) {
+
+ my @bad_fields =  (grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}});
+  for my $logfile (grep { -s $_ } @ARGV) {
 #warn $logfile;
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     while (<$f>) {
-      my ($ip) = /^(\S+)/;
+      my ($ip) = $_ =~ $config{ip_re};#/^(\S+)/;
+        ++$stat{total}{lines};
       ++$ip{$ip}{total} if $ip{$ip};
+#dmp $ip;
+#dmp $re;
       next if !$ip{$ip} and $_ !~ $re;
-#print $_;
+#dmp $_ if $_ =~ $re;
+#      next if  $_ !~ $re;
+      local %_;
+#dmp  $_,$ip,$ip{$ip},$re, $_ !~ $re  ;
+#dmp  $ip,$ip{$ip}, $_ !~ $re  ;
 #m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) (?<timezone>\S+)\] "(?<metod>\S+) (?<url>\S+) (?<proto>\S+)" (?<status>\d+) (?<size>\d+) "(?<ref>.*?)" "(?<ua>.*?)" (?<domain>\S+) (?<header>\d+) (?<fullsize>\S+) (?<seconds>\d+)};
-m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) \S+\] "\S+ (?<url>\S+) \S+" \d+ (?<size>\d+) "(?<ref>.*?)" "(?<ua>.*?)" (?<domain>\S+) \d+ \S+ (?<seconds>\d+)};
-      %_ = %+;
+#m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) \S+\] "\S+ (?<url>\S+) \S+" \d+ (?<size>\d+) "(?<ref>.*?)" "(?<ua>.*?)" (?<domain>\S+) \d+ \S+ (?<seconds>\d+)};
+      if ($config{log_kv}) {
+        %_ = map {/([^=]+)=?(.*)?/} split /\t+/;
+        ($_{url}) = $_{request} =~ /\S+ (\S+) \S+/ if $_{request} and !$_{url};
+#dmp \%_;
+      } else {
+        $_ =~ $config{log_re};
+        %_ = %+;
+      }
       next unless $_{ip};
-      next if $_{ua} =~ $goodua;
-      $ip{ $_{ip} }{ua_first} ||= $_{ua};
-      if ( $badua{ $_{ua} } ) {
-        ++$ip{ $_{ip} }{bad_ua};
-        $ip{ $_{ip} }{bad_ua_first} ||= $_{ua};
-        ++$stat{badua_total};
-      } else {
-        ++$stat{other_ua}{ $_{ua} };
-        ++$stat{other_ua_total};
+#dmp $config{good}{ua};
+      next if $_{ua} =~ $config{good}{ua};
+
+#exit;
+
+      $ip{$_{ip}}{first}{$_} ||= $_{$_} for grep {length $_{$_}}  qw(ua ref url);
+      #$ip{$_{ip}}{ua_first} ||= $_{ua};
+      for my $field (@bad_fields ) { #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
+        if ($config{bad}{$field}{$_{$field}}) {
+          $ip{$_{ip}}{first}{'bad_' . $field} ||= $_{$field} if $_{$field};
+          ++$stat{total}{bad}{$field};
+        } else {
+        }
+      ++$stat{fields}{$field}{$_{$field}} if $_{$field};
       }
-      if ( $badurl{ $_{url} } ) {
-        ++$ip{ $_{ip} }{bad_url};
-        $ip{ $_{ip} }{bad_url_first} ||= $_{url};
-      } else {
-        #++$ip{ $_{ip} }{other_url}{$_{url}};
-        ++$stat{other_url}{ $_{url} };
-        ++$stat{other_url_total};
+    
+      if (0) {
+        if ($config{bad}{ua}{$_{ua}}) {
+          ++$ip{$_{ip}}{bad_ua};
+          $ip{$_{ip}}{bad_ua_first} ||= $_{ua};
+          ++$stat{badua_total};
+        } else {
+          ++$stat{other_ua}{$_{ua}};
+          ++$stat{other_ua_total};
+        }
+        if ($config{bad}{url}{$_{url}}) {
+          ++$ip{$_{ip}}{bad_url};
+          #$ip{$_{ip}}{bad_url_first} ||= $_{url};
+        } else {
+          #++$ip{ $_{ip} }{other_url}{$_{url}};
+          ++$stat{other_url}{$_{url}};
+          ++$stat{other_url_total};
+        }
+        if ($config{bad}{ref}{$_{ref}}) {
+          ++$ip{$_{ip}}{ref_bad};
+          $ip{$_{ip}}{ref_bad_first} ||= $_{ref};
+        }
+        #! ++$stat{domain}{ $_{domain} } if $_{domain};
+        ++$stat{ref}{$_{ref}} if $_{ref};
+        #warn $_{url};
+        #warn Dumper \%_ if $goodurl{$_{url}};
       }
-      if ( $config{ref_bad}{ $_{ref} } ) {
-        ++$ip{ $_{ip} }{ref_bad};
-        $ip{ $_{ip} }{ref_bad_first} ||= $_{ref};
+      if ($config{good}{url}{$_{url}}) {
+        ++$ip{$_{ip}}{good_url};
+        ++$stat{good_url_ua}{$_{ua}};
+        ++$ip{$_{ip}}{good_url_ua}{$_{ua}};
       }
-      #! ++$stat{domain}{ $_{domain} } if $_{domain};
-       ++$stat{ref}{ $_{ref} } if $_{ref};
-      #warn $_{url};
-      #warn Dumper \%_ if $goodurl{$_{url}};
-      if ( $goodurl{ $_{url} } ) {
-        ++$ip{ $_{ip} }{good_url};
-        ++$stat{good_url_ua}{ $_{ua} };
-        ++$ip{ $_{ip} }{good_url_ua}{ $_{ua} };
-      }
-      $stat{bad_traff} += $_{size};
-      $stat{bad_sec}   += $_{seconds};
-      ( $_{net} = $_{ip} ) =~ s/\.\d+$//;
-      if ( $ip{ $_{ip} }{good_url} ) {
-        delete $net{ $_{net} }{ $_{ip} };
-        delete $ban{ $_{ip} };
-        #warn "good [ $_{ip} ] ", Dumper  $ip{ $_{ip} };
-        ++$ip{ $_{ip} }{good_url_skip};
-        ++$stat{good_url_skip};
-      } else {
-        ++$net{ $_{net} }{ $_{ip} } if $_{net};
-        ++$ban{ $_{ip} } if $_{ip};
+      $stat{total}{bad_traff}   += $_{size}    if $_{size};
+      $stat{total}{bad_seconds} += $_{seconds} if $_{seconds};
+      if ($config{deny_net}) { ($_{net} = $_{ip}) =~ s/\.\d+$//; }
+      if ($config{deny_ip}) {
+        if ($ip{$_{ip}}{good_url}) {
+          delete $net{$_{net}}{$_{ip}};
+          delete $ban{$_{ip}};
+          #warn "good [ $_{ip} ] ", Dumper  $ip{ $_{ip} };
+          ++$ip{$_{ip}}{good_url_skip};
+          ++$stat{good_url_skip};
+        } else {
+          ++$net{$_{net}}{$_{ip}} if $_{net};
+          ++$ban{$_{ip}} if $_{ip};
+        }
       }
     }
   }
-  $stat{bad_ip} = scalar keys %ip if %ip;
-print Dumper \%ip, \%stat, \%net, \%ban;
+  $stat{total}{bad_ips} = scalar keys %ip if %ip;
+    $stat{zzz_total} = $stat{total};
+#  dmp 'stat:', \%ip, \%stat, \%net, \%ban;
+  dmp 'stat:', \%ip, \%stat;
+for my $field (@bad_fields) {
+print "stat by $field:\n";
+print map { "$stat{fields}{$field}{$_} : $_\n" } sort    { $stat{fields}{$field}{$b} <=>$stat{fields}{$field}{$a} } keys %{ $stat{fields}{$field} || {} }
+#    $stat{fields}
+}
+
 #print map { "$stat{other_url}{$_} : $_\n" } sort    { $stat{other_url}{$b} <=> $stat{other_url}{$a} } keys %{ $stat{other_url} || {} }
 #print map { "$stat{domain}{$_} : $_\n" } sort    { $stat{domain}{$b} <=> $stat{domain}{$a} } keys %{ $stat{domain} || {} }
 #print map { "$stat{ref}{$_} : $_\n" } sort    { $stat{ref}{$b} <=> $stat{ref}{$a} } keys %{ $stat{ref} || {} }
@@ -173,7 +222,7 @@ print Dumper \%ip, \%stat, \%net, \%ban;
 #print Dumper \%stat;
 #print Dumper \%ip;
 } else {
-  for my $logfile ( ref $config{'logfile'} eq 'ARRAY' ? @{ $config{'logfile'} } : $config{'logfile'} ) {
+  for my $logfile (ref $config{'logfile'} eq 'ARRAY' ? @{$config{'logfile'}} : $config{'logfile'}) {
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     my $time = time;
     while (<$f>) {
@@ -184,37 +233,41 @@ print Dumper \%ip, \%stat, \%net, \%ban;
       if (s/^\s*((?:\d+\.?)+)\s+//) {
         $ip = $1;
       } else {
-        %_ = map { ( split /=/, $_, 2 ) } split /\t/;
-        if ( keys %_ == 1 ) {
+        %_ = map { (split /=/, $_, 2) } split /\t/;
+        if (keys %_ == 1) {
           ($ip) = keys %_;
-          if ( !$_{$ip} ) {
+          if (!$_{$ip}) {
             delete $_{$ip};
           }
         }
       }
       $_{ip} ||= $ip if $ip;
       next if $_{t} and $_{t} + 86400 * 30 < $time;
-      next if $_{ua} =~ $goodua;
+      next if $_{ua} =~ $config{good}{ua};
       next if !$_{ip} or $_{ip} =~ /^0|127|255\./;
       #next if $_{ip} =~ /^10\.131\.120\.10?|188\.123\.230\.122$/;    #your safe ip
       #warn ("cookied", $_),
-      next if $_{cookie} and $cookie{ $_{ip} }++ < 10;
-      ( $_{net} = $_{ip} ) =~ s/\.\d+$//;
-      ++$net{ $_{net} }{ $_{ip} };
-      ++$ban{ $_{ip} };
+      next if $_{cookie} and $cookie{$_{ip}}++ < 10;
+      ($_{net} = $_{ip}) =~ s/\.\d+$//;
+      ++$net{$_{net}}{$_{ip}};
+      ++$ban{$_{ip}};
     }
   }
 }
 #print 'ban, net:', Dumper \%ban, \%net;
 system "$config{fw} table $config{ipfwtable} flush"
   if grep { $_ eq 'flush' } @ARGV;
-for ( keys %net ) {
-  next if keys %{ $net{$_} } < $config{'netmin'};
-  system "$config{fw} table $config{ipfwtable} add $_.0/24";
-  delete $ban{$_} for keys %{ $net{$_} };
+if ($config{deny_net}) {
+  for (keys %net) {
+    next if keys %{$net{$_}} < $config{'netmin'};
+    system "$config{fw} table $config{ipfwtable} add $_.0/24";
+    delete $ban{$_} for keys %{$net{$_}};
+  }
 }
-for ( keys %ban ) {
-  system "$config{fw} table $config{ipfwtable} add $_";
+if ($config{deny_ip}) {
+  for (keys %ban) {
+    system "$config{fw} table $config{ipfwtable} add $_";
+  }
 }
 42;
 # perltidy -b -i=2 -ce -l=128 -nbbc -sob -otr -sot index.cgi
