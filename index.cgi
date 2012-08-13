@@ -6,7 +6,7 @@
 perl index.cgi
  process /tmp/banbot banperm
 
-perl index.cgi /path/to/access.log
+perl index.cgi /path/to/access.log --print_all
  process access.log
 
 run from web server:
@@ -37,6 +37,11 @@ to ban security hole scanners:
 OR
  ln -s /usr/local/www/nobot/defence.conf /usr/local/etc/apache22/Includes
 and include defence.conf in your httpd.conf
+
+=TIPS
+
+count all / hits:
+ egrep "GET /(\?.*) HTTP" access.log.* | wc
 
 =cut
 use strict;
@@ -83,12 +88,13 @@ if ($ENV{'SERVER_PORT'}) {
                     #}
   exit;
 }    # els
-my (%ban, %net, %cookie, %ip, %stat, %statbig);
+my (%ban, %net, %cookie,  %stat, %statbig, %statbigfull);
+my %ip = %{$config{ip}||{}};
 if (grep { -s $_ } @ARGV) {
-  sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}g; return $_ }
+  sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}go; return $_ }
   my @bad_fields = sort grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}};
   my $re = join '|', map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, (map { $config{fast_re_url_bef} . $_ } keys %{$config{bad}{url} || {}}), (keys %{$config{bad}{ref} || {}}));
-  $re = qr/$re/;
+  $re = qr/$re/o;
   my $stop;
   local $SIG{INT} = sub { ++$stop; warn "stopping $stop; now $stat{total}{lines};"};
   local $SIG{TERM} = $SIG{INT};
@@ -97,14 +103,18 @@ if (grep { -s $_ } @ARGV) {
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     while (<$f>) {
       ++$stat{total}{lines};
+      next if $config{skip} and $_ =~ $config{skip};
+      ++$stat{total}{hits};
       if ($config{fast_re}) {
         my ($ip) = $_ =~ $config{ip_re};    #/^(\S+)/;
         ++$ip{$ip}{total} if $ip{$ip};
 #dmp $ip;
 #dmp $re;
         ++$statbig{ip}{$ip};
-        ++$statbig{url}{$1} if /request=GET (\S+) /;
-        ++$statbig{ref}{$1} if /referer=(\S+)/;
+        $statbigfull{$ip}{first} ||= $_;
+        $statbigfull{$ip}{last} = $_;
+        ++$statbig{url}{$1} if /request=GET (\S+) /o;
+        ++$statbig{ref}{$1} if /referer=(\S+)/o;
         next if !$ip{$ip} and $_ !~ $re;
       }
 #dmp $_ if $_ =~ $re;
@@ -115,10 +125,10 @@ if (grep { -s $_ } @ARGV) {
 #m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) (?<timezone>\S+)\] "(?<metod>\S+) (?<url>\S+) (?<proto>\S+)" (?<status>\d+) (?<size>\d+) "(?<ref>.*?)" "(?<ua>.*?)" (?<domain>\S+) (?<header>\d+) (?<fullsize>\S+) (?<seconds>\d+)};
 #m{^(?<ip>\S+) \S+ \S+ \[(?<datetime>\S+) \S+\] "\S+ (?<url>\S+) \S+" \d+ (?<size>\d+) "(?<ref>.*?)" "(?<ua>.*?)" (?<domain>\S+) \d+ \S+ (?<seconds>\d+)};
       if ($config{log_kv}) {
-        %_ = map {/([^=]+)=?(.*)?/} split /\t+/;
-        ($_{url}) = $_{request} =~ /\S+ (\S+) \S+/ if $_{request} and !$_{url};
+        %_ = map {/([^=]+)=?(.*)?/} split /\t+/o;
+        ($_{url}) = $_{request} =~ /\S+ (\S+) \S+/o if $_{request} and !$_{url};
         #$_{url} =~ s/\?_=\d+//;
-        ($_{url_noparams} = $_{url}) =~ s/\?.*//;
+        ($_{url_noparams} = $_{url}) =~ s/\?.*//o;
         $_{ref} = $_{referer};
 #dmp \%_;
       } else {
@@ -127,10 +137,27 @@ if (grep { -s $_ } @ARGV) {
       }
       next unless $_{ip};
 #dmp $config{good}{ua};
+      chomp;
+
+      unless ($config{fast_re}) {
+        ++$ip{$_{ip}}{total} if $ip{$_{ip}};
+#dmp $ip;
+#dmp $re;
+        ++$statbig{ip}{$_{ip}};
+        #$statbigfull{$_{ip}} ||= $_;
+        $statbigfull{$_{ip}}{first} ||= $_;
+        $statbigfull{$_{ip}}{last} = $_;
+        ++$statbig{url}{$_{url}}; #if /request=GET (\S+) /o;
+        ++$statbig{ref}{$_{ref}}; #if /referer=(\S+)/o;
+        ++$statbigfull{$_{ip}}{$_}{$_{$_}} for qw(url ua ref);
+
+      }
+
       next if $config{good}{ua} and $_{ua} =~ $config{good}{ua};
 #exit;
       #$ip{$_{ip}}{ua_first} ||= $_{ua};
       my $bad_hit;
+#dmp if $_{ip} eq '195.110.32.60';
       for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
         if ($config{bad}{$field}{$_{$field}}) {
           #$ip{$_{ip}}{first}{'bad_' . $field} ||= $_{$field} if $_{$field};
@@ -139,11 +166,12 @@ if (grep { -s $_ } @ARGV) {
           ++$bad_hit;
           #} else {
         }
-        ++$ip{$_{ip}}{fields}{$field}{$_{$field}} if $_{$field};
+        ++$ip{$_{ip}}{fields}{$field}{$_{$field}} if $_{$field} and ($ip{$_{ip}} or $bad_hit);
 #        ++$stat{fields}{$field}{$_{$field}} if $_{$field};
       }
+#dmp 'bh', $ip{$_{ip}};
       next if !$bad_hit and !$ip{$_{ip}};
-      print $_ if $config{print_bad};
+      print "$_\n" if $config{print_bad};
       ++$stat{total}{bad_hits};
       $ip{$_{ip}}{first}{$_} ||= $_{$_} for grep { length $_{$_} } qw(ua ref url);
       for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
@@ -192,16 +220,16 @@ if (grep { -s $_ } @ARGV) {
       my $items = scalar keys %{$stat{fields}{$field} || {}};
       print "stat by $field (total $items):\n";
       for (sort { $stat{fields}{$field}{$b} <=> $stat{fields}{$field}{$a} } keys %{$stat{fields}{$field} || {}}) {
-        last if $stat{fields}{$field}{$_} < ($config{stat_min} || $items / 1000);
+        last if $stat{fields}{$field}{$_} < ($config{stat_min} || $items / $config{stat_div});
         print "$stat{fields}{$field}{$_} : $_\n";
       }
     }
     for my $field (sort keys %statbig) {
       my $items = keys %{$statbig{$field} || {}};
       print "big stat by $field (total $items):\n";
-      for (sort { $statbig{$field}{$b} <=> $statbig{$field}{$a} } keys %{$statbig{$field} || {}}) {
-        last if $statbig{$field}{$_} < ($config{statbig_min} || $items / 1000);
-        print "$statbig{$field}{$_} : $_\n";
+      for my $item (sort { $statbig{$field}{$b} <=> $statbig{$field}{$a} } keys %{$statbig{$field} || {}}) {
+        last if $statbig{$field}{$item} < ($config{statbig_min} || $items / $config{stat_div});
+        print "$statbig{$field}{$item} : $item ",($field eq 'ip' ? ((join '; ', map {"$_=". scalar keys %{$statbigfull{$item}{$_}||{}}} qw(ua url ref))." . first: $statbigfull{$item}{first} ||| last: $statbigfull{$item}{last}" ): ""). "\n";
       }
     }
   }
@@ -213,13 +241,13 @@ if (grep { -s $_ } @ARGV) {
     my $time = time;
     while (<$f>) {
       local %_;
-      next if $_ =~ /^\s*(?:#|$)/;
+      next if $_ =~ /^\s*(?:#|$)/o;
       chomp;
       my $ip;
-      if (s/^\s*((?:\d+\.?)+)\s+//) {
+      if (s/^\s*((?:\d+\.?)+)\s+//o) {
         $ip = $1;
       } else {
-        %_ = map { (split /=/, $_, 2) } split /\t/;
+        %_ = map { (split /=/o, $_, 2) } split /\t/o;
         if (keys %_ == 1) {
           ($ip) = keys %_;
           if (!$_{$ip}) {
@@ -230,11 +258,11 @@ if (grep { -s $_ } @ARGV) {
       $_{ip} ||= $ip if $ip;
       next if $_{t} and $_{t} + 86400 * 30 < $time;
       next if $_{ua} =~ $config{good}{ua};
-      next if !$_{ip} or $_{ip} =~ /^0|127|255\./;
-      #next if $_{ip} =~ /^10\.131\.120\.10?|188\.123\.230\.122$/;    #your safe ip
+      next if !$_{ip} or $_{ip} =~ /^0|127|255\./o;
+      #next if $_{ip} =~ /^10\.131\.120\.10?|188\.123\.230\.122$/o;    #your safe ip
       #warn ("cookied", $_),
       next if $_{cookie} and $cookie{$_{ip}}++ < 10;
-      ($_{net} = $_{ip}) =~ s/\.\d+$//;
+      ($_{net} = $_{ip}) =~ s/\.\d+$//o;
       ++$net{$_{net}}{$_{ip}};
       ++$ban{$_{ip}};
     }
