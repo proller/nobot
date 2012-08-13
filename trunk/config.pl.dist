@@ -10,7 +10,7 @@ $config{fast_re}         = 1;
 $config{fast_re_url_bef} = 'GET ';
 #$config{print_bad}       = 1;
 $config{stat_div} = 1000;
-$config{good}{ua}        = qr/bot|Yahoo|Rambler|facebook/i;
+$config{good}{ua} = qr/bot|Yahoo|Rambler|facebook/i;
 $config{bad}{ua} = {map { $_ => 1 } (
     'Mozilla/0.6 Beta (Windows)',
     'Mozilla/1.22 (compatible; MSIE 2.0; Windows 95)',
@@ -32,9 +32,6 @@ $config{bad}{url} = {map { $_ => 1 } qw(
     /?form=1&lang=ru&q=VMWARE.KMS.FOR.OFF-ONLINE.ACTIVATION.WIN7.PRO-ENT.VOL.EDITION-RU_BOARD
     )};
 $config{good}{url} = {map { $_ => 1 } qw(/i/logo.png /lib/lib.js /base.css)};
-
 #$config{skip} = qr{GET /(?:favicon\.ico) }o; #skip hits by re
-
 # $config{ip}  = {map {$_=>{}} qw( 1.2.3.4 5.6.7.8); #force collect stat about (top hits)};
-
 42;

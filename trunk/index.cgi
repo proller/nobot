@@ -44,6 +44,7 @@ count all / hits:
  egrep "GET /(\?.*) HTTP" access.log.* | wc
 
 =cut
+
 use strict;
 use Data::Dumper;
 $Data::Dumper::Sortkeys = $Data::Dumper::Useqq = $Data::Dumper::Indent = 1;
@@ -88,15 +89,15 @@ if ($ENV{'SERVER_PORT'}) {
                     #}
   exit;
 }    # els
-my (%ban, %net, %cookie,  %stat, %statbig, %statbigfull);
-my %ip = %{$config{ip}||{}};
+my (%ban, %net, %cookie, %stat, %statbig, %statbigfull);
+my %ip = %{$config{ip} || {}};
 if (grep { -s $_ } @ARGV) {
   sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}go; return $_ }
   my @bad_fields = sort grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}};
   my $re = join '|', map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, (map { $config{fast_re_url_bef} . $_ } keys %{$config{bad}{url} || {}}), (keys %{$config{bad}{ref} || {}}));
   $re = qr/$re/o;
   my $stop;
-  local $SIG{INT} = sub { ++$stop; warn "stopping $stop; now $stat{total}{lines};"};
+  local $SIG{INT} = sub { ++$stop; warn "stopping $stop; now $stat{total}{lines};" };
   local $SIG{TERM} = $SIG{INT};
   for my $logfile (grep { -s $_ } @ARGV) {
     warn "reading $logfile";
@@ -138,7 +139,6 @@ if (grep { -s $_ } @ARGV) {
       next unless $_{ip};
 #dmp $config{good}{ua};
       chomp;
-
       unless ($config{fast_re}) {
         ++$ip{$_{ip}}{total} if $ip{$_{ip}};
 #dmp $ip;
@@ -147,12 +147,13 @@ if (grep { -s $_ } @ARGV) {
         #$statbigfull{$_{ip}} ||= $_;
         $statbigfull{$_{ip}}{first} ||= $_;
         $statbigfull{$_{ip}}{last} = $_;
-        ++$statbig{url}{$_{url}}; #if /request=GET (\S+) /o;
-        ++$statbig{ref}{$_{ref}}; #if /referer=(\S+)/o;
+        ++$statbig{url}{$_{url}};    #if /request=GET (\S+) /o;
+        ++$statbig{ref}{$_{ref}};    #if /referer=(\S+)/o;
         ++$statbigfull{$_{ip}}{$_}{$_{$_}} for qw(url ua ref);
-
+        ++$statbigfull{$_{ip}}{$_{url_noparams}} if $_{url_noparams} eq '/';
+        ++$statbigfull{$_{ip}}{'total'};
       }
-
+      ++$stat{total}{$_{url_noparams}} if $_{url_noparams} eq '/';
       next if $config{good}{ua} and $_{ua} =~ $config{good}{ua};
 #exit;
       #$ip{$_{ip}}{ua_first} ||= $_{ua};
@@ -177,15 +178,13 @@ if (grep { -s $_ } @ARGV) {
       for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
         ++$stat{fields}{$field}{$_{$field}} if $_{$field};
       }
-
-
-      for my $field (sort keys %{$config{good}||{}}) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
-       if (ref $config{good}{$field} eq 'HASH' and $config{good}{$field}{$_{$field}}) {
-         ++$ip{$_{ip}}{good}{$field}{$_{$field}};
-         ++$ip{$_{ip}}{good_other}{$_}{$_{$_}} for @bad_fields
-         #++$stat{good_url_ua}{$_{ua}};
-         #++$ip{$_{ip}}{good_url_ua}{$_{ua}};
-       }
+      for my $field (sort keys %{$config{good} || {}}) { #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
+        if (ref $config{good}{$field} eq 'HASH' and $config{good}{$field}{$_{$field}}) {
+          ++$ip{$_{ip}}{good}{$field}{$_{$field}};
+          ++$ip{$_{ip}}{good_other}{$_}{$_{$_}} for @bad_fields
+            #++$stat{good_url_ua}{$_{ua}};
+            #++$ip{$_{ip}}{good_url_ua}{$_{ua}};
+        }
       }
       #if ($config{good}{url}{$_{url}}) {
       #  ++$ip{$_{ip}}{good_url};
@@ -213,8 +212,7 @@ if (grep { -s $_ } @ARGV) {
   $stat{total}{bad_ips} = scalar keys %ip if %ip;
 #  $stat{zzz_total} = $stat{total};
 #  dmp 'stat:', \%ip, \%stat, \%net, \%ban;
-  dmp 'ipstat:', \%ip,   if $config{print_ips};
-  dmp 'stat:',   \%stat, if $config{print_stat};
+  dmp 'ipstat:', \%ip, if $config{print_ips};
   if ($config{print_top}) {
     for my $field (@bad_fields) {
       my $items = scalar keys %{$stat{fields}{$field} || {}};
@@ -228,11 +226,20 @@ if (grep { -s $_ } @ARGV) {
       my $items = keys %{$statbig{$field} || {}};
       print "big stat by $field (total $items):\n";
       for my $item (sort { $statbig{$field}{$b} <=> $statbig{$field}{$a} } keys %{$statbig{$field} || {}}) {
-        last if $statbig{$field}{$item} < ($config{statbig_min} || $items / $config{stat_div});
-        print "$statbig{$field}{$item} : $item ",($field eq 'ip' ? ((join '; ', map {"$_=". scalar keys %{$statbigfull{$item}{$_}||{}}} qw(ua url ref))." . first: $statbigfull{$item}{first} ||| last: $statbigfull{$item}{last}" ): ""). "\n";
+        if ($field eq 'ip') {
+          if (scalar keys %{$statbigfull{$item}{ua}} > 10) {
+            $stat{total}{'hits_/_ua>10'} += $statbigfull{$item}{'/'};
+            ++$stat{'hosts_ua>10'};
+          }
+        }
+        next if $statbig{$field}{$item} < ($config{statbig_min} || $items / $config{stat_div});
+        print "$statbig{$field}{$item} : $item\t", ($field eq 'ip' ? ((join '; ', map { "$_=" . scalar keys %{$statbigfull{$item}{$_} || {}} } qw(ua url ref)),
+            "\t/=$statbigfull{$item}{'/'}; bad=$ip{$item}{total}; ",
+            "\t  first: $statbigfull{$item}{first} ||| last: $statbigfull{$item}{last}") : ""), "\n";
       }
     }
   }
+  dmp 'stat:', \%stat, if $config{print_stat};
 #print Dumper \%stat;
 #print Dumper \%ip;
 } else {
