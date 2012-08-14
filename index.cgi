@@ -100,6 +100,7 @@ if (grep { -s $_ } @ARGV) {
   local $SIG{INT} = sub { ++$stop; warn "stopping $stop; now $stat{total}{lines};" };
   local $SIG{TERM} = $SIG{INT};
   for my $logfile (grep { -s $_ } @ARGV) {
+    last if $stop;
     warn "reading $logfile";
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     while (<$f>) {
@@ -208,6 +209,16 @@ if (grep { -s $_ } @ARGV) {
       }
       last if $stop;
     }
+    warn "cleaning before:", scalar %statbigfull;
+    for my $ip (keys %statbigfull) {
+      if ($statbigfull{$ip}{total} < 100) {
+        delete $statbigfull{$ip};
+        for my $field (keys %statbig) {
+          delete $statbig{$field}{$ip};
+        }
+      }
+    }
+    warn "cleaning after:", scalar %statbigfull;
   }
   $stat{total}{bad_ips} = scalar keys %ip if %ip;
 #  $stat{zzz_total} = $stat{total};
