@@ -104,6 +104,7 @@ if (grep { -s $_ } @ARGV) {
     warn "reading $logfile";
     warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
     while (<$f>) {
+      last if $stop;
       ++$stat{total}{lines};
       next if $config{skip} and $_ =~ $config{skip};
       ++$stat{total}{hits};
