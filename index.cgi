@@ -61,7 +61,7 @@ local %_ = (
   'fw'        => 'ipfw -q',
 );
 $config{$_} = $_{$_} for keys %_;
-do 'config.pl';
+do('config.pl') || do('config.pl.dist');
 map { /-*([^=]+)=?(.*)/; $config{$1} = $2 || 1 } grep {/^-/} @ARGV;
 $config{print_bad} = $config{print_top} = $config{print_ips} = $config{print_stat} = $config{print_all} if $config{print_all};
 #dmp \%config;
@@ -111,13 +111,12 @@ if (grep { -s $_ } @ARGV) {
       if ($config{fast_re}) {
         my ($ip) = $_ =~ $config{ip_re};    #/^(\S+)/;
         ++$ip{$ip}{total} if $ip{$ip};
-#dmp $ip;
-#dmp $re;
         ++$statbig{ip}{$ip};
         $statbigfull{$ip}{first} ||= $_;
         $statbigfull{$ip}{last} = $_;
         ++$statbig{url}{$1} if /request=GET (\S+) /o;
         ++$statbig{ref}{$1} if /referer=(\S+)/o;
+
         next if !$ip{$ip} and $_ !~ $re;
       }
 #dmp $_ if $_ =~ $re;
@@ -133,18 +132,14 @@ if (grep { -s $_ } @ARGV) {
         #$_{url} =~ s/\?_=\d+//;
         ($_{url_noparams} = $_{url}) =~ s/\?.*//o;
         $_{ref} = $_{referer};
-#dmp \%_;
       } else {
         $_ =~ $config{log_re};
         %_ = %+;
       }
       next unless $_{ip};
-#dmp $config{good}{ua};
       chomp;
       unless ($config{fast_re}) {
         ++$ip{$_{ip}}{total} if $ip{$_{ip}};
-#dmp $ip;
-#dmp $re;
         ++$statbig{ip}{$_{ip}};
         #$statbigfull{$_{ip}} ||= $_;
         $statbigfull{$_{ip}}{first} ||= $_;
@@ -157,10 +152,8 @@ if (grep { -s $_ } @ARGV) {
       }
       ++$stat{total}{$_{url_noparams}} if $_{url_noparams} eq '/';
       next if $config{good}{ua} and $_{ua} =~ $config{good}{ua};
-#exit;
       #$ip{$_{ip}}{ua_first} ||= $_{ua};
       my $bad_hit;
-#dmp if $_{ip} eq '195.110.32.60';
       for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
         if ($config{bad}{$field}{$_{$field}}) {
           #$ip{$_{ip}}{first}{'bad_' . $field} ||= $_{$field} if $_{$field};
@@ -172,7 +165,6 @@ if (grep { -s $_ } @ARGV) {
         ++$ip{$_{ip}}{fields}{$field}{$_{$field}} if $_{$field} and ($ip{$_{ip}} or $bad_hit);
 #        ++$stat{fields}{$field}{$_{$field}} if $_{$field};
       }
-#dmp 'bh', $ip{$_{ip}};
       next if !$bad_hit and !$ip{$_{ip}};
       print "$_\n" if $config{print_bad};
       ++$stat{total}{bad_hits};
@@ -287,7 +279,7 @@ if (grep { -s $_ } @ARGV) {
     }
   }
 }
-#print 'ban, net:', Dumper \%ban, \%net;
+print 'ban, net:', Dumper \%ban, \%net if $config{print_ban};
 system "$config{fw} table $config{ipfwtable} flush"
   if grep { $_ eq 'flush' } @ARGV;
 if ($config{deny_net}) {
