@@ -47,8 +47,9 @@ count all / hits:
 
 use strict;
 use Data::Dumper;
+use IO::Uncompress::Gunzip;
 $Data::Dumper::Sortkeys = $Data::Dumper::Useqq = $Data::Dumper::Indent = 1;
-sub dmp (@) { print join ', ', (map { ref $_ ? Data::Dumper->new([$_])->Indent(1)->Pair('=>')->Terse(1)->Sortkeys(1)->Dump() : "'$_'" } @_), "\n"; }
+sub dmp (@) { print !@_ ? $_ : join ', ', (map { ref $_ ? Data::Dumper->new([$_])->Indent(1)->Pair('=>')->Terse(1)->Sortkeys(1)->Dump() : "'$_'" } @_), "\n"; }
 our %config;
 $config{root_path} = (($0 =~ m{^(.*(?:^|/))([^/]+)$})[0] || './');
 local %_ = (
@@ -99,11 +100,22 @@ if (grep { -s $_ } @ARGV) {
   my $stop;
   local $SIG{INT} = sub { ++$stop; warn "stopping $stop; now $stat{total}{lines};" };
   local $SIG{TERM} = $SIG{INT};
-  for my $logfile (grep { -s $_ } @ARGV) {
+  for my $file (grep { -s $_ } @ARGV) {
     last if $stop;
-    warn "reading $logfile";
-    warn("cant open [$logfile]: $!"), next unless open my $f, '<', $logfile;
-    while (<$f>) {
+    warn "reading $file";
+    #warn("cant open [$file]: $!"), next unless open my $f, '<', $file;
+
+    my $fh;
+    if ($file =~ /\.gz$/) {
+        if ($config{gzip_test} and my $bad = `gzip --test $file 2>&1`) {
+            warn('error', "gzip --test:" . $bad);
+        }
+        $fh = IO::Uncompress::Gunzip->new($file) or warn('error', "uncompress [$file] failed: $IO::Uncompress::Gunzip::GunzipError"), next;
+    } else {
+        open($fh, '<', $file) or warn('error', "open [$file] failed $!"), next;
+    }
+
+    while (<$fh>) {
       last if $stop;
       ++$stat{total}{lines};
       next if $config{skip} and $_ =~ $config{skip};

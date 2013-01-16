@@ -39,7 +39,9 @@ $config{good}{url} = {map { $_ => 1 } qw(/i/logo.png /lib/lib.js /base.css)};
 $config{deny_net} = 1;
 $config{deny_ip} = 1;
 
-$config{print_ban} = 1 ;
+$config{print_top} = 1;
+$config{print_ips} = 1;
+$config{print_ban} = 1;
 $config{print_bad} = 1;
 $config{print_stat} = 1;
 
