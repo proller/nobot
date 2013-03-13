@@ -95,8 +95,9 @@ my %ip = %{$config{ip} || {}};
 if (grep { -s $_ } @ARGV) {
   sub resc ($) { local $_ = shift; s{([\(\)\.\[\]\{\}\?])}{\\\1}go; return $_ }
   my @bad_fields = sort grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}};
-  my $re = join '|', map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, (map { $config{fast_re_url_bef} . $_ } keys %{$config{bad}{url} || {}}), (keys %{$config{bad}{ref} || {}}));
+  my $re = join '|', $config{bad_ua}, map { resc $_ } sort (keys %{$config{bad}{ua} || {}}, (map { $config{fast_re_url_bef} . $_ } keys %{$config{bad}{url} || {}}), (keys %{$config{bad}{ref} || {}}));
   $re = qr/$re/o;
+#warn $re;
   my $stop;
   local $SIG{INT} = sub { ++$stop; warn "stopping $stop; now $stat{total}{lines};" };
   local $SIG{TERM} = $SIG{INT};
@@ -128,7 +129,7 @@ if (grep { -s $_ } @ARGV) {
         $statbigfull{$ip}{last} = $_;
         ++$statbig{url}{$1} if /request=GET (\S+) /o;
         ++$statbig{ref}{$1} if /referer=(\S+)/o;
-
+#warn 'fre';
         next if !$ip{$ip} and $_ !~ $re;
       }
 #dmp $_ if $_ =~ $re;
@@ -163,7 +164,7 @@ if (grep { -s $_ } @ARGV) {
         ++$statbigfull{$_{ip}}{'total'};
       }
       ++$stat{total}{$_{url_noparams}} if $_{url_noparams} eq '/';
-      next if $config{good}{ua} and $_{ua} =~ $config{good}{ua};
+      next if $config{good}{ua} and $_{ua} ~~ $config{good}{ua};
       #$ip{$_{ip}}{ua_first} ||= $_{ua};
       my $bad_hit;
       for my $field (@bad_fields) {    #(grep { ref $config{bad}{$_} eq 'HASH' } keys %{$config{bad} || {}}) {
@@ -176,6 +177,15 @@ if (grep { -s $_ } @ARGV) {
         }
         ++$ip{$_{ip}}{fields}{$field}{$_{$field}} if $_{$field} and ($ip{$_{ip}} or $bad_hit);
 #        ++$stat{fields}{$field}{$_{$field}} if $_{$field};
+      }
+      for my $field (qw(ua )) {
+          if ($config{"bad_$field"} and $_{$field} ~~ $config{"bad_$field"}) {
+#warn qq{t[$_{$field} ~~ $config{"bad_$field"}]};
+	      ++$stat{total}{bad}{$field};
+              ++$stat{total}{bad_hits};
+              ++$bad_hit;
+              ++$ip{$_{ip}}{fields}{$field}{$_{$field}} if $_{$field} and ($ip{$_{ip}} or $bad_hit);
+          }
       }
       next if !$bad_hit and !$ip{$_{ip}};
       print "$_\n" if $config{print_bad};
